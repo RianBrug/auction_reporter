@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  scraper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app
+    depends_on:
+      chrome:
+        condition: service_healthy
+    environment:
+      - PYTHONPATH=/app/src
+      - DOCKER_ENV=true
+    platform: linux/arm64
+    command: python src/local.py
+
+  chrome:
+    image: seleniarm/standalone-chromium:latest
+    ports:
+      - "4444:4444"
+    shm_size: '2gb'
+    platform: linux/arm64
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "http://localhost:4444/wd/hub/status"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  pgdata:
