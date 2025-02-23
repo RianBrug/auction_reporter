@@ -1,16 +1,16 @@
-import json
+import logging
 from lambda_function import lambda_handler
 
-def run_local():
-    # Simulate Lambda event and context
-    event = {}
-    context = {}
-    
-    # Run the lambda handler
-    result = lambda_handler(event, context)
-    
-    # Print results
-    print(json.dumps(result, indent=2))
+# Configure logging to output to terminal
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler()  # This will output to terminal
+    ]
+)
 
 if __name__ == "__main__":
-    run_local() 
+    # Call the lambda handler with empty event and context
+    result = lambda_handler({}, None)
+    print("\nResult:", result) 

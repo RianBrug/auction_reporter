@@ -13,6 +13,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+logger.addHandler(logging.StreamHandler())
 
 def get_chrome_driver():
     chrome_options = Options()
@@ -96,8 +97,9 @@ def scrape_auctions(driver, url):
     return auctions
 
 def lambda_handler(event, context):
-    url = 'https://www.centralsuldeleiloes.com.br/leiloes?q=florianopolis'
+    url = 'https://www.centralsuldeleiloes.com.br/leiloes/leilao-de-imovel?q=itapiruba'
     driver = None
+    logger.info(f"Scraping auctions from {url}")
     
     try:
         driver = get_chrome_driver()

@@ -1,0 +1,8 @@
+auctions_venv/
+*.pyc
+__pycache__/
+output/
+*.log
+*.pid
+*.sock
+.vscode/
