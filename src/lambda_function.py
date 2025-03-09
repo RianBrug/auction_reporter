@@ -1,124 +1,139 @@
 import json
-import os
 import logging
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-import time
-from selenium.webdriver.chrome.service import Service
-from selenium.common.exceptions import WebDriverException
-from webdriver_manager.chrome import ChromeDriverManager
+import os
+from typing import Dict, Any, List
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-logger.addHandler(logging.StreamHandler())
+from src.utils.driver_factory import get_chrome_driver, close_driver
+from src.adapters.central_sul_adapter import CentralSulAdapter
+from src.llm.deepseek_client import DeepseekClient
+from src.models.auction import Auction
+from src.config import DEFAULT_QUERY, LOG_LEVEL
 
-def get_chrome_driver():
-    chrome_options = Options()
-    chrome_options.add_argument('--headless')
-    chrome_options.add_argument('--no-sandbox')
-    chrome_options.add_argument('--disable-dev-shm-usage')
-    
-    max_retries = 5
-    retry_delay = 2
-    
-    for attempt in range(max_retries):
-        try:
-            if os.getenv('AWS_LAMBDA_FUNCTION_NAME'):
-                chrome_options.binary_location = '/opt/chrome/chrome'
-                return webdriver.Chrome(
-                    executable_path='/opt/chromedriver',
-                    options=chrome_options
-                )
-            elif os.getenv('DOCKER_ENV'):
-                # Docker development - use remote WebDriver
-                return webdriver.Remote(
-                    command_executor='http://chrome:4444/wd/hub',
-                    options=chrome_options
-                )
-            else:
-                # Local development - use local Chrome
-                service = Service(ChromeDriverManager().install())
-                return webdriver.Chrome(
-                    service=service,
-                    options=chrome_options
-                )
-        except WebDriverException as e:
-            if attempt == max_retries - 1:
-                raise
-            logger.warning(f"Failed to connect to Chrome (attempt {attempt + 1}/{max_retries}). Retrying in {retry_delay} seconds...")
-            time.sleep(retry_delay)
+# Configure logging
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
-def scrape_auctions(driver, url):
-    driver.get(url)
-    auctions = []
+def search_all_sources(query: str, location: str = "Brasil") -> List[Dict[str, Any]]:
+    """
+    Search for auctions across all configured sources
     
-    try:
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.CLASS_NAME, "auction-container"))
-        )
-        time.sleep(2)  # Small delay to ensure content loads
+    Args:
+        query: Search query
+        location: Location context
         
-        auction_containers = driver.find_elements(By.CLASS_NAME, "auction-container")
-        logger.info(f"Found {len(auction_containers)} auction containers")
-
-        for container in auction_containers:
-            try:
-                auction_title = container.find_element(By.CSS_SELECTOR, 'h2.lot-list-item-value').text
-                auction_date = container.find_element(By.CSS_SELECTOR, 'div.lot-list-item-auction-heading span.lot-list-item-value').text
-                lots = container.find_elements(By.CLASS_NAME, 'lot-list-item')
-                
-                for lot in lots:
-                    try:
-                        lot_data = {
-                            'auction_title': auction_title,
-                            'auction_date': auction_date,
-                            'title': lot.find_element(By.CSS_SELECTOR, 'a.lot-list-item-value').text.strip(),
-                            'url': lot.find_element(By.CSS_SELECTOR, 'a.lot-list-item-value').get_attribute('href'),
-                            'image_url': lot.find_element(By.CSS_SELECTOR, 'img.ng-star-inserted').get_attribute('src'),
-                            'evaluation': lot.find_elements(By.CSS_SELECTOR, 'div.lot-list-item-value')[0].text.strip(),
-                            'minimum_bid': lot.find_elements(By.CSS_SELECTOR, 'div.lot-list-item-value')[1].text.strip()
-                        }
-                        auctions.append(lot_data)
-                        logger.info(f"Found lot: {lot_data['title']}")
-                    except Exception as e:
-                        logger.error(f"Error parsing lot: {str(e)}")
-                        continue
-                        
-            except Exception as e:
-                logger.error(f"Error parsing auction container: {str(e)}")
-                continue
-                
-    except Exception as e:
-        logger.error(f"Error waiting for auctions: {str(e)}")
-        
-    return auctions
-
-def lambda_handler(event, context):
-    url = 'https://www.centralsuldeleiloes.com.br/leiloes/leilao-de-imovel?q=itapiruba'
+    Returns:
+        List of auction data
+    """
     driver = None
-    logger.info(f"Scraping auctions from {url}")
+    all_auctions = []
     
     try:
         driver = get_chrome_driver()
-        auctions = scrape_auctions(driver, url)
+        
+        # Initialize LLM client if API key is available
+        llm_client = DeepseekClient()
+        
+        # CentralSul search
+        try:
+            logger.info(f"Searching CentralSul Leiloes for '{query}'")
+            adapter = CentralSulAdapter(driver=driver, llm_client=llm_client)
+            auctions = adapter.search(query=query, location=location)
+            
+            # Convert to Auction objects and set source
+            for auction_data in auctions:
+                auction_data['source'] = 'central_sul'
+                auction = Auction.from_dict(auction_data)
+                all_auctions.append(auction.to_dict())
+                
+            logger.info(f"Found {len(auctions)} relevant auctions from CentralSul")
+        except Exception as e:
+            logger.error(f"Error searching CentralSul: {str(e)}")
+        
+        # Add more sources here as needed
+        # Example:
+        # try:
+        #     logger.info(f"Searching Another Source for '{query}'")
+        #     adapter = AnotherSourceAdapter(driver=driver, llm_client=llm_client)
+        #     auctions = adapter.search(query=query, location=location) 
+        #     ...
+        # except Exception as e:
+        #     logger.error(f"Error searching Another Source: {str(e)}")
+        
+    except Exception as e:
+        logger.error(f"Error during auction search: {str(e)}")
+    finally:
+        close_driver(driver)
+    
+    return all_auctions
+
+def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """
+    AWS Lambda handler function
+    
+    Args:
+        event: Lambda event data
+        context: Lambda context
+        
+    Returns:
+        API Gateway compatible response
+    """
+    logger.info("Starting auction crawler")
+    
+    try:
+        # Get search query from event or use default
+        query = event.get('query', DEFAULT_QUERY)
+        location = event.get('location', "Santa Catarina, Brasil")
+        
+        # Set environment variables from config or event
+        # Default to disabled LLM to avoid API errors
+        os.environ['USE_LLM'] = str(event.get('use_llm', False)).lower()
+        os.environ['FETCH_DESCRIPTIONS'] = str(event.get('fetch_descriptions', True)).lower()
+        
+        # Always enable deduplication
+        os.environ['DEDUPLICATE'] = 'true'
+        
+        logger.info(f"Searching for auctions with query: {query} in {location}")
+        logger.info(f"LLM enabled: {os.environ['USE_LLM']}, Descriptions enabled: {os.environ['FETCH_DESCRIPTIONS']}")
+        
+        auctions = search_all_sources(query, location)
+        
+        # Apply deduplication at the top level to ensure no duplicates
+        unique_auctions = {}
+        for auction in auctions:
+            url = auction.get('url')
+            if url and url not in unique_auctions:
+                unique_auctions[url] = auction
+        
+        # Convert back to list
+        deduplicated_auctions = list(unique_auctions.values())
+        if len(deduplicated_auctions) != len(auctions):
+            logger.info(f"Final deduplication: {len(auctions)} -> {len(deduplicated_auctions)}")
         
         return {
             'statusCode': 200,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
             'body': json.dumps({
-                'auctions': auctions
-            })
+                'auctions': deduplicated_auctions,
+                'count': len(deduplicated_auctions),
+                'query': query,
+                'location': location
+            }, ensure_ascii=False)
         }
     except Exception as e:
         logger.error(f"Error in lambda execution: {str(e)}")
         return {
             'statusCode': 500,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
             'body': json.dumps({
                 'error': str(e)
             })
         }
-    finally:
-        if driver:
-            driver.quit()

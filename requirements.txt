@@ -1,6 +1,9 @@
-scrapy
-webdriver-manager
-selenium==4.16.0
-chromedriver-binary==120.0.6099.109.0
-pytest==7.4.3
-python-dotenv==1.0.0
+# Core dependencies
+selenium>=4.9.0
+webdriver-manager>=3.8.6
+requests>=2.31.0
+python-dotenv>=1.0.0
+
+# For development
+black>=23.3.0
+pytest>=7.3.1
