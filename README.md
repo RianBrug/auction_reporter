@@ -8,6 +8,7 @@ An intelligent crawler for monitoring property auctions across multiple Brazilia
 - 🏙️ Support for multiple locations with intelligent variations
 - 🏢 Clean architecture for easy extension to multiple auction sites
 - 📊 Detailed information about each auction (price, description, etc.)
+- 🤖 NEW: LLM-based auction generator for realistic auction listings
 
 ## Supported Locations
 
@@ -27,13 +28,17 @@ You can also search for other locations, but these have specific optimizations.
 auction_crawler/
 ├── src/
 │   ├── adapters/          # Website-specific adapters
-│   ├── llm/               # DeepSeek LLM integration
+│   ├── llm/               # DeepSeek LLM integration and generators
 │   ├── models/            # Data models
 │   ├── utils/             # Utility functions
 │   ├── config.py          # Configuration
-│   ├── lambda_function.py # AWS Lambda handler
-│   └── local.py           # Local runner
+│   ├── lambda_function.py # AWS Lambda handler (scraping version)
+│   ├── lambda_function_llm.py # AWS Lambda handler (LLM version)
+│   ├── local.py           # Local runner (scraping version)
+│   └── local_llm.py       # Local runner (LLM version)
 ├── requirements.txt
+├── run.sh                 # Run script for scraping version
+├── run_llm.sh             # Run script for LLM version
 ├── Makefile
 └── README.md
 ```
@@ -46,18 +51,18 @@ auction_crawler/
 make install
 ```
 
-2. Configure your environment (optional):
+2. Configure your environment (required for LLM version):
 
 ```bash
 cp .env.example .env
-# Edit .env as needed
+# Edit .env and add your DEEPSEEK_API_KEY
 ```
 
 ## Usage
 
-### Using the Run Script
+### Web Scraping Version
 
-The easiest way to run the crawler is with the provided script:
+Using the run script:
 
 ```bash
 # Make the script executable (one time only)
@@ -71,28 +76,57 @@ chmod +x run.sh
 
 # See all supported locations
 ./run.sh --list-locations
+```
 
-# Enable debug mode
-./run.sh -q "balneario-camboriu" --debug
+### LLM-Based Version (NEW)
 
-# Show browser window during scraping
-./run.sh -q "sao-paulo" --no-headless
+The LLM-based version generates realistic auction listings without scraping websites:
+
+```bash
+# Make the script executable (one time only)
+chmod +x run_llm.sh
+
+# Run with default location (Itapiruba)
+./run_llm.sh
+
+# Generate auctions for a different location
+./run_llm.sh -q florianopolis
+
+# See all supported locations
+./run_llm.sh --list-locations
 ```
 
 ### Manual Execution
 
-You can also run the crawler directly:
+You can also run either version directly:
 
 ```bash
-# Basic run with default query
+# Web scraping version
 python src/local.py -q "itapiruba" --deduplicate
 
-# Search in a specific location
-python src/local.py -q "florianopolis" -l "Santa Catarina" --deduplicate
-
-# Debug mode with browser window visible
-python src/local.py -q "rio-de-janeiro" -d --no-headless --deduplicate
+# LLM-based version
+python src/local_llm.py -q "itapiruba"
 ```
+
+## LLM Integration
+
+The project now has two modes of operation:
+
+1. **Web Scraping Mode**: Scrapes auction websites directly for real-time data
+2. **LLM-Based Mode**: Uses DeepSeek AI to generate realistic auction listings
+
+The LLM mode is useful when:
+- You need example data without accessing the real websites
+- You want to test the application without making real web requests
+- The website structure changes and scraping temporarily doesn't work
+- You want to see what types of auctions would typically be available
+
+### Configuration for LLM
+
+To use the LLM-based version, you need a DeepSeek API key:
+
+1. Get an API key from DeepSeek: https://platform.deepseek.com/
+2. Add it to your `.env` file: `DEEPSEEK_API_KEY=your_key_here`
 
 ## Adding New Locations
 
@@ -116,6 +150,7 @@ The crawler uses a modular, adapter-based architecture:
 - **Adapters**: Website-specific code for extracting auction data
 - **Models**: Data structures for representing auctions
 - **Config**: Centralized configuration and location-specific settings
+- **LLM**: Integration with DeepSeek API for auction generation and analysis
 
 ## License
 
